@@ -1,0 +1,332 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────
+enum UserRole {
+  ADMIN
+  RESTAURANT
+  COURIER
+  CUSTOMER
+}
+
+enum RestaurantStatus {
+  OPEN
+  BUSY
+  CLOSED
+}
+
+enum OrderStatus {
+  PLACED
+  CONFIRMED
+  PREPARING
+  READY
+  PICKED_UP
+  OUT_FOR_DELIVERY
+  DELIVERED
+  CANCELLED
+}
+
+enum DeliveryStatus {
+  UNASSIGNED
+  ASSIGNED
+  PICKING_UP
+  ON_THE_WAY
+  ARRIVING
+  DELIVERED
+}
+
+enum CourierStatus {
+  IDLE
+  BUSY
+  OFFLINE
+}
+
+enum PaymentMethod {
+  UPI
+  CARD
+  WALLET
+  CASH
+  NETBANKING
+}
+
+enum TransactionType {
+  PAYMENT
+  REFUND
+  PAYOUT
+}
+
+enum TransactionStatus {
+  PENDING
+  SETTLED
+  FAILED
+  REFUNDED
+}
+
+enum Provider {
+  DIRECT
+  SWIGGY
+  ZOMATO
+  URBANPIPER
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum NotificationType {
+  ORDER
+  DELIVERY
+  ALERT
+  PAYMENT
+  REVIEW
+  RESTAURANT
+}
+
+// ─── Identity ─────────────────────────────────────────────
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(CUSTOMER)
+  name         String
+  phone        String?
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  restaurant    Restaurant?     @relation("RestaurantOwner")
+  courier       CourierProfile?
+  addresses     Address[]
+  orders        Order[]         @relation("CustomerOrders")
+  reviews       Review[]
+  notifications Notification[]
+  tickets       SupportTicket[]
+}
+
+model Address {
+  id     String  @id @default(cuid())
+  userId String
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  label  String?
+  line1  String
+  city   String
+  lat    Float?
+  lng    Float?
+  orders Order[]
+}
+
+// ─── Catalog ──────────────────────────────────────────────
+model Restaurant {
+  id          String           @id @default(cuid())
+  name        String
+  cuisine     String
+  area        String
+  address     String?
+  rating      Float            @default(0)
+  reviewCount Int              @default(0)
+  prepTime    Int              @default(20) // minutes
+  commission  Float            @default(18) // percent
+  status      RestaurantStatus @default(OPEN)
+  source      Provider         @default(DIRECT)
+  ownerId     String?          @unique
+  owner       User?            @relation("RestaurantOwner", fields: [ownerId], references: [id])
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  menuItems     MenuItem[]
+  orders        Order[]
+  platformLinks PlatformLink[]
+  reviews       Review[]
+
+  @@index([status])
+  @@index([cuisine])
+}
+
+model MenuItem {
+  id           String     @id @default(cuid())
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  name         String
+  description  String?
+  price        Decimal    @db.Decimal(10, 2)
+  cuisine      String?
+  category     String?
+  calories     Int?
+  prepTime     Int?
+  difficulty   String?
+  imageUrl     String?
+  isAvailable  Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  orderItems OrderItem[]
+
+  @@index([restaurantId])
+}
+
+// ─── Fulfilment ───────────────────────────────────────────
+model CourierProfile {
+  id         String        @id @default(cuid())
+  userId     String        @unique
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle    String        @default("Bike")
+  status     CourierStatus @default(OFFLINE)
+  rating     Float         @default(5)
+  currentLat Float?
+  currentLng Float?
+
+  deliveries Delivery[]
+}
+
+model Order {
+  id                String        @id @default(cuid())
+  code              String        @unique // e.g. ORD-7841
+  customerId        String
+  customer          User          @relation("CustomerOrders", fields: [customerId], references: [id])
+  restaurantId      String
+  restaurant        Restaurant    @relation(fields: [restaurantId], references: [id])
+  deliveryAddressId String?
+  deliveryAddress   Address?      @relation(fields: [deliveryAddressId], references: [id])
+  status            OrderStatus   @default(PLACED)
+  source            Provider      @default(DIRECT)
+  externalId        String? // Swiggy/Zomato order id when source != DIRECT
+  subtotal          Decimal       @db.Decimal(10, 2)
+  deliveryFee       Decimal       @default(0) @db.Decimal(10, 2)
+  tax               Decimal       @default(0) @db.Decimal(10, 2)
+  total             Decimal       @db.Decimal(10, 2)
+  paymentMethod     PaymentMethod
+  placedAt          DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  items        OrderItem[]
+  delivery     Delivery?
+  transactions Transaction[]
+  review       Review?
+
+  @@index([status])
+  @@index([restaurantId])
+  @@index([customerId])
+  @@index([placedAt])
+}
+
+model OrderItem {
+  id            String    @id @default(cuid())
+  orderId       String
+  order         Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId    String?
+  menuItem      MenuItem? @relation(fields: [menuItemId], references: [id])
+  nameSnapshot  String // name/price frozen at order time
+  priceSnapshot Decimal   @db.Decimal(10, 2)
+  quantity      Int       @default(1)
+}
+
+model Delivery {
+  id          String          @id @default(cuid())
+  orderId     String          @unique
+  order       Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  courierId   String?
+  courier     CourierProfile? @relation(fields: [courierId], references: [id])
+  status      DeliveryStatus  @default(UNASSIGNED)
+  etaMinutes  Int?
+  assignedAt  DateTime?
+  pickedUpAt  DateTime?
+  deliveredAt DateTime?
+
+  @@index([status])
+}
+
+// ─── Money ────────────────────────────────────────────────
+model Transaction {
+  id         String            @id @default(cuid())
+  orderId    String?
+  order      Order?            @relation(fields: [orderId], references: [id])
+  type       TransactionType   @default(PAYMENT)
+  method     PaymentMethod
+  amount     Decimal           @db.Decimal(10, 2)
+  fee        Decimal           @default(0) @db.Decimal(10, 2)
+  status     TransactionStatus @default(PENDING)
+  gatewayRef String? // Razorpay/Stripe reference — never card data
+  createdAt  DateTime          @default(now())
+
+  @@index([type])
+  @@index([status])
+}
+
+// ─── Integrations ─────────────────────────────────────────
+model PlatformLink {
+  id              String     @id @default(cuid())
+  restaurantId    String
+  restaurant      Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  provider        Provider
+  externalStoreId String // "swiggystore" / "zomatomarket" store id
+  isActive        Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+
+  @@unique([restaurantId, provider])
+}
+
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  provider   Provider
+  eventType  String?
+  payload    Json // raw inbound body, for audit/replay
+  processed  Boolean  @default(false)
+  error      String?
+  receivedAt DateTime @default(now())
+
+  @@index([provider])
+  @@index([processed])
+}
+
+// ─── Engagement ───────────────────────────────────────────
+model Review {
+  id           String     @id @default(cuid())
+  customerId   String
+  customer     User       @relation(fields: [customerId], references: [id])
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id])
+  orderId      String?    @unique
+  order        Order?     @relation(fields: [orderId], references: [id])
+  rating       Int
+  comment      String?
+  createdAt    DateTime   @default(now())
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType
+  title     String
+  body      String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+}
+
+model SupportTicket {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id])
+  subject   String
+  category  String
+  priority  Priority     @default(MEDIUM)
+  status    TicketStatus @default(OPEN)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}

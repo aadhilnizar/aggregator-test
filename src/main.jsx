@@ -4,9 +4,12 @@
 
   import "./index.css";
   import router from "./Router";
+  import { AuthProvider } from "./auth/auth-context";
 
   createRoot(document.getElementById("root")).render(
     <StrictMode>
-      <RouterProvider router={router} />
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
     </StrictMode>
   );

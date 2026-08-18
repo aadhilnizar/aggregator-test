@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: orderhub-postgres
+    environment:
+      POSTGRES_USER: orderhub
+      POSTGRES_PASSWORD: orderhub
+      POSTGRES_DB: orderhub
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: orderhub-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:
